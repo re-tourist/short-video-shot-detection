@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+/data/
+/outputs/
+/models/
+*.pth
+*.[mM][pP]4
+shots.json
+shot_[0-9]*.jpg
+cut-review.csv
+cut_*-*.jpg
