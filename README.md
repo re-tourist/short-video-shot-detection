@@ -28,8 +28,6 @@
 
 两个检测器使用统一的批处理与输出流程，生成镜头起止时间及对应预览图。
 
-**默认使用部署成本较低的 AdaptiveDetector**，并保留 TransNet V2 供独立对照。
-
 ### 3. 输入差异与异常处理
 
 程序通过 OpenCV 后端读取视频，不要求输入具有固定分辨率或帧率。TransNet V2 在推理前将视频帧缩放至模型要求的尺寸。
@@ -42,7 +40,7 @@
 
 **真实案例与工程验证。** 官方样片 `sample-01.mp4` 使用 AdaptiveDetector 检出 34 个镜头，前三段为 0–2.333333、2.333333–4.4、4.4–5.8 秒。三条样片在两种检测器下均处理成功，分别输出 100 和 77 个镜头。逐条验证了区间从 0 秒连续覆盖至视频结束，以及每个镜头的 JPEG 可解码。混入损坏 MP4 后，其余视频仍生成结果。
 
-**人工评测与已知问题。** 样片为 15 FPS，AdaptiveDetector 默认最短切点间隔 15 帧（1 秒），会限制密集切点的检出。双算法在 ±3 帧下有 53 个单侧预测，已整理成核查材料，误检、漏检和准确性待人工标注确认。详见[基线实验](docs/baseline-results.md)和[算法对照与人工核查](docs/detector-comparison.md)。
+**切点对照。** 按 ±3 帧容差匹配，三条样片共有 59 对匹配切点和 53 个单侧预测。详见[基线实验](docs/baseline-results.md)和[算法对照与人工核查](docs/detector-comparison.md)。
 
 **AI 辅助开发。** [AGENTS.md](AGENTS.md) 的三条规则在交付中有直接作用。
 
@@ -50,14 +48,14 @@
 - **Verify What Matters** 用真实视频检查覆盖范围和预览图，混入损坏文件验证批处理隔离。
 - **Keep Delivery Reproducible** 固定依赖和上游代码版本，记录权重校验值，并排除本地素材及运行产物。
 
-## 二、部署运行
+## 部署运行
 
 ### 1. 环境准备
 
-Python ≥ 3.10，安装依赖：
+使用 Python ≥ 3.10，在仓库根目录安装依赖并执行下文命令。
 
-```
-pip install -r requirements.txt
+```powershell
+python -m pip install -r requirements.txt
 ```
 
 将待处理的 MP4 视频放入 `data/` 目录。
@@ -92,20 +90,33 @@ outputs/adaptive/
 ```
 
 - `shots.json`：各镜头的起止时间及预览图路径。
-- `shot_XXXX.jpg`：对应镜头的预览图。
+- `shot_XXXX.jpg`：从对应镜头的中点附近读取的预览图。
 
 镜头时间以秒为单位，采用左闭右开区间 `[start, end)`。
 
-> 测试素材不包含在公开仓库中，运行时需自行放入 `data/`。
+> 三条测试视频、对应截图及必要的实际输出由项目负责人通过私下渠道交付。运行时将测试视频放入 `data/`。
 
-### 4. 人工评测
+### 4. 生成核验材料
 
-用浏览器打开 `outputs/shot-review.html`，在顶部切换三条样片，并排查看两个检测器的镜头区间和预览图。
+将可读取的 15 FPS 样片（`*.mp4`）放在 `data/` 下，先用上面的两条检测命令为同一批视频生成 `outputs/adaptive/<视频名去掉扩展名>/shots.json` 和 `outputs/transnetv2/<视频名去掉扩展名>/shots.json`。然后在仓库根目录运行：
 
-- **查看镜头**：点击镜头从起点播放，到终点自动暂停。可重播或切换同一检测器的上一镜头、下一镜头。
-- **核查切点**：点击分歧切点，从切点前约 1 秒播放原视频。拖动进度条到当前镜头区间外也可恢复普通播放。
-- **记录结果**：以原视频为准，按视频名和帧号在 `outputs/cut-review/cut-review.csv` 填写人工标签和备注。
+```powershell
+python review_cuts.py
+```
 
-![人工评测界面，使用公开动画演示](docs/Developer/shot-review-demo.png)
+默认生成以下核验材料。若 `outputs/cut-review/` 已存在，可用 `python review_cuts.py --output-dir outputs/cut-review-v2` 写入一个尚未创建的目录，保留已有标注。
 
-演示素材为 [Big Buck Bunny](https://peach.blender.org/about/) 的 30 秒节选。© 2008 Blender Foundation / www.bigbuckbunny.org，[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)。
+- `outputs/cut-review/cut-review.csv` 记录按优先级排序的匹配切点和单侧预测，包含视频名、从 0 开始的帧号、时间、两种检测器的预测帧，以及待填写的 `human_label` 和 `notes`。
+- `outputs/cut-review/frames/cut_<视频名去掉扩展名>-<五位帧号>.jpg` 为单侧预测的对照图，左侧是切点前一帧，右侧是切点帧。CSV 中的 `comparison_image` 路径相对于 CSV 所在目录。
+
+按 `priority` 优先检查单侧预测，结合对照图在原视频的 `time_seconds` 附近回放，必要时逐帧确认。需要记录时，可将真实硬切、真实渐变、无切点或不确定填入 `human_label`，并在 `notes` 记录实际边界帧或渐变起止帧。检查双方共同漏检时，需连续观看原视频区间并标出其中所有真实切点。
+
+## 人工核验与结果分析
+
+**核验过程。** 项目负责人已完整观看三条测试视频，并重点检查算法生成的镜头片段，关注场景切换、背景变化、人物变化和快速混剪。人工回看未发现明显误检或漏检。最终切点全部由算法自动生成，未手工指定或调整边界。
+
+**观察结果。** 两种算法在三条样片上整体表现较好，能够较有效地切分场景、背景或人物变化明显的镜头，对快速混剪的处理也较理想。AdaptiveDetector 整体切分较细，TransNet V2 的切分相对较粗，部分语义连贯的连续画面被保留在较长片段中。
+
+**默认方案。** 继续采用 AdaptiveDetector。更细的切分便于后续素材打标、检索和重新组合，无需下载或加载深度学习模型，且在本次三条样片上的表现满足基本需求。TransNet V2 保留为可选检测器，供后续对照。
+
+**验证边界。** 本次回看属于定性评估。“未发现明显误检或漏检”仅反映本次人工观察，仍可能存在未察觉的错误。尚未建立逐帧人工标注的标准镜头边界数据集，因此本项目暂无 Precision、Recall、F1 或其他准确率指标。AdaptiveDetector 默认最短切点间隔为 15 帧，在 15 FPS 样片上相当于 1 秒，可能影响更短镜头的检出。渐变转场、视觉差异较小的切换和更复杂的视频场景仍需进一步验证。
